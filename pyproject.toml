@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "backtest-validator"
+version = "0.1.0"
+description = "A battery of statistical tests that tries to kill false positives in trading-signal research."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Parveen Kumar Naresh Kumar" }]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10"]
+keywords = ["backtesting", "multiple testing", "deflated sharpe ratio", "bootstrap",
+            "reality check", "conformal prediction", "quantitative finance"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License",
+               "Intended Audience :: Science/Research", "Topic :: Scientific/Engineering :: Mathematics"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4", "matplotlib>=3.7"]
+
+[project.scripts]
+btv = "backtest_validator.cli:main"
+
+[project.urls]
+Repository = "https://github.com/parveen06naresh/backtest-validator"
+
+[tool.setuptools]
+packages = ["backtest_validator"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E731", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/build_paper.py" = ["E501"]  # the paper's HTML template

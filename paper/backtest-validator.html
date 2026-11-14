@@ -1,0 +1,260 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>Backtest Validator</title>
+<style>
+@page { size: Letter; margin: 0.72in 0.75in 0.72in 0.75in; }
+body { font-family: 'Charter', 'Georgia', serif; font-size: 10pt; line-height: 1.38; color: #111; }
+h1 { font-size: 16.5pt; margin: 0 0 4pt; line-height: 1.2; }
+h2 { font-size: 11.5pt; margin: 13pt 0 4pt; }
+h3 { font-size: 10pt; margin: 9pt 0 2pt; }
+p { margin: 0 0 6pt; text-align: justify; hyphens: auto; }
+.auth { font-size: 10pt; color: #333; margin-bottom: 8pt; }
+.abs { border-top: 1px solid #bbb; border-bottom: 1px solid #bbb; padding: 7pt 0; margin-bottom: 8pt; font-size: 9.4pt; }
+table { border-collapse: collapse; width: 100%; font-size: 8.4pt; margin: 4pt 0 6pt; font-family: 'Helvetica', 'Arial', sans-serif; }
+th, td { padding: 2.2pt 4pt; border-bottom: 1px solid #e3e3e0; text-align: center; }
+th { border-bottom: 1px solid #888; font-weight: 600; }
+td.l, th.l { text-align: left; }
+td.ok { color: #1d6b3a; } td.no { color: #b2361f; font-weight: 600; } td.na { color: #999; }
+.cap { font-size: 8.6pt; color: #444; margin: 0 0 9pt; }
+figure { margin: 6pt 0 2pt; } figure img { width: 100%; }
+.eq { text-align: center; margin: 4pt 0 6pt; font-style: italic; }
+ol.refs { font-size: 8.3pt; padding-left: 16pt; line-height: 1.3; }
+.note { font-size: 8.5pt; color: #444; }
+code { font-size: 8.8pt; }
+</style></head><body>
+
+<h1>Backtest Validator: a test battery for killing false positives in trading-signal research</h1>
+<div class="auth">Parveen Kumar Naresh Kumar &middot; University of South Florida &middot;
+github.com/parveen06naresh/backtest-validator &middot; November 2026</div>
+
+<div class="abs"><b>Abstract.</b> A backtest that looks good is cheap to produce: try enough rules,
+parameters and periods and one of them will. We describe an open-source Python framework that takes a
+trading idea together with the record of everything that was tried to find it, and runs eight gates,
+each aimed at one known way of fooling oneself: trading costs and market impact, timing that a random
+alignment matches, selection from many trials, in-sample overfitting, instability across regimes,
+dependence on perfect execution, failure on held-out data, and a calibrated bound on future
+performance. On 400 synthetic markets with no edge, picking the best of
+99 textbook rules and running a plain significance test gives a false positive
+32% of the time; the corrected tests stay at or below 5%, and the full
+verdict passed none of them (95% upper bound 1.0%). We then apply it
+to four real ideas on 76 years of public index data: the trend rule from our earlier Crash Replay project,
+the best of 912 data-mined technical rules, and the turn-of-the-month effect, plus
+replications on other indexes. None survives. The data-mined winner passes the Holm, Romano-Wolf and SPA
+corrections and still fails, because its edge vanishes with a one-day execution delay and on data after
+1999. The turn-of-the-month effect passes every statistical gate before its publication and reverses
+afterwards. The tool is for research and teaching, not investment advice.</div>
+
+<h2>1. Problem</h2>
+<p>Most published and private backtests are the survivors of a search. If a researcher tries
+<i>N</i> unrelated rules on noise, the best in-sample Sharpe ratio grows like
+&radic;(2 ln <i>N</i>) standard errors, so a "t-statistic above 2" is close to guaranteed
+[3, 12]. Harvey, Liu and Zhu [12] argue that factor research should require <i>t</i> &gt; 3 for this
+reason, and Bailey et al. [3, 4] show that the probability of backtest overfitting can be estimated
+directly. The tools exist in separate papers. What is missing in practice is a single, tested
+procedure that runs them together, records the search honestly, and reports which test killed an idea.
+That is the aim of this project. It extends two of our earlier pieces of work: the random-trader
+permutation test in Crash Replay, and the conformal risk bounds used to schedule requests in Pacer.</p>
+
+<h2>2. Method</h2>
+<h3>2.1 Data, timing and costs</h3>
+<p>We use public daily data cached in the repository so every number reproduces offline: the S&amp;P 500
+(1950 to 30 Oct 2026) with dividends from Shiller's monthly series, the Nasdaq Composite (1972+) and Dow
+(1992+) as price indexes, the 3-month T-bill (FRED TB3MS, lagged one month) as cash, and NBER recession
+dates. A rule maps information at the close of day <i>t</i> to a position <i>w<sub>t</sub></i> in
+[-1, 1] that earns the excess return from <i>t</i> to <i>t</i>+1. A unit test perturbs all future prices
+and checks that past positions do not change. Each change in position pays</p>
+<p class="eq">cost = |&Delta;w| &middot; ( s/2 + f + Y &middot; &sigma;<sub>d</sub> &middot;
+&radic;( |&Delta;w| &middot; AUM / ADV ) ),</p>
+<p>a half-spread, a fee, and the square-root market-impact law [1, 24] with daily volatility
+&sigma;<sub>d</sub>. Defaults are 1 bp, 0.5 bp, Y = 1, $10M of capital and $20B of daily volume for the
+traded vehicle (an index ETF or future); a harsh scenario uses 5x spread and fee and 2x impact.
+Capacity is the largest AUM at which the edge stays positive.</p>
+<p><b>Like-for-like comparison.</b> Timing rules on an index mostly change exposure. To avoid crediting
+a rule for holding less risk, each rule's net excess return and the benchmark's (buy and hold) are scaled
+to 10% annual volatility before subtracting. The resulting <i>active return</i> d<sub>k,t</sub> has a
+mean proportional to the Sharpe-ratio edge, and every test below is a test on d.</p>
+
+<h3>2.2 The eight gates</h3>
+<p><b>Costs.</b> The edge must be positive after realistic and after harsh costs.
+<b>Timing.</b> A circular-shift permutation test: slide the whole position series against the returns
+by <i>s</i> days. Positions keep their autocorrelation, holding periods and average exposure; returns keep
+theirs; only the alignment is broken. We exclude shifts that would pair a position with a return it was
+computed from, and evaluate all admissible shifts exactly with FFTs. We also report Crash Replay's
+original random-trader test for comparison.
+<b>Selection.</b> One shared stationary bootstrap [20] of the T&times;K active-return matrix
+(automatic block length [21, 18]) gives White's Reality Check [25], Hansen's SPA test [11] and Romano-Wolf
+StepM adjusted p-values [22]; Holm [13], Benjamini-Hochberg [7] and Benjamini-Yekutieli [8] adjustments are
+also reported. The gate requires the Deflated Sharpe Ratio [5, 6] to be at least 0.95 and the candidate's
+StepM p-value to be at most 0.05. The DSR hurdle is the expected maximum Sharpe of <i>N</i><sub>eff</sub>
+null trials, with <i>N</i><sub>eff</sub> = &rho;&#772; + (1 &minus; &rho;&#772;)<i>N</i> from the mean
+correlation of the trials. For the variance in the hurdle we use the sampling variance of a zero-Sharpe
+estimate; the original cross-trial variance is reported too and is stricter when a family contains
+rules that are genuinely bad.
+<b>Overfitting.</b> PBO by combinatorially symmetric cross-validation [4] with 16 blocks.
+<b>Stability.</b> The edge must be positive in both halves and in at least 60% of non-overlapping
+3-year blocks, with no OLS-CUSUM break in the mean [19] (Newey-West variance [17]). We also tabulate the edge
+by decade, trend state, volatility state and recession.
+<b>Delay.</b> The edge must survive trading one day later.
+<b>Holdout.</b> If a holdout date is given, the candidate is chosen without it and must keep a positive
+edge on it.
+<b>Conformal bound.</b> Walking forward every quarter, we choose a rule on the last 5 years and record
+its next-3-year edge; the haircut (in-sample minus out-of-sample) is the conformity score. The bound for a
+new origin is the in-sample edge minus the (1 &minus; &alpha;<sub>t</sub>) quantile of completed past
+haircuts, with &alpha;<sub>t</sub> updated by Adaptive Conformal Inference [10] once each outcome is known
+(the same online update as in Pacer). The gate asks that today's 80% lower bound be above zero.
+An idea <b>survives</b> only if it passes every gate that applies.</p>
+
+<h2>3. Does the battery control false positives?</h2>
+<p>We simulate 400 markets of 20 years from a GARCH(1,1) with Student-t(5) shocks:
+volatility clusters and tails are fat, but the mean is zero, so no rule can beat buy and hold on Sharpe and
+every discovery is false. On each we run the 99-rule standard family (trend,
+crossovers, momentum, reversal, RSI, breakout, Bollinger and trend-with-volatility-target rules), pick the
+best, and hold out the last 5 years.</p>
+<figure><img src="figures/harness.png"></figure>
+<p class="cap"><b>Figure 1.</b> Left: share of null markets where each method calls the best rule real,
+with 95% Wilson intervals. Right: power when a real trend effect is planted (x-axis: the Sharpe edge it
+creates for a 100-day trend rule, measured on 400 years of simulated data).</p>
+<p>A plain test on the best rule is "significant" in 32% of null
+markets, six times the nominal rate even though the rules share a common benchmark. Every correction
+brings this to 5% or less: Holm 0.5%, BH 1.2%, Reality Check
+3.8%, SPA 2.2%, Romano-Wolf
+1.8%, DSR 0.2%. The full verdict
+passed none (1.0% upper bound). The timing gate alone, applied to the
+<i>selected</i> rule, fires in 55% of null markets: a single-rule
+test is only valid for a rule fixed in advance, which is why selection is its own gate. Mean PBO under
+the null is 0.49, as theory predicts.</p>
+<p><b>Single-rule calibration.</b> For rules fixed in advance (Table 1), the circular-shift test rejects
+close to 5% with and without a market drift. Crash Replay's random-trader test does not: when the market
+has a positive drift it rejects up to 19%
+of the time, because random traders who switch at random dates spend about half their time in the market
+while a trend rule is invested most of the time. It rewards exposure as if it were skill. This is a flaw in
+our earlier project that this framework found and fixes.</p>
+<table><tr><th class="l">Fixed rule, 400 markets</th>
+<th>Circular shift, no drift</th><th>Random trader, no drift</th><th>Circular shift, 6% drift</th>
+<th>Random trader, 6% drift</th></tr><tr><td class='l'>sma200</td><td>3.5%</td><td>5.0%</td><td>6.0%</td><td><b>17.5%</b></td></tr><tr><td class='l'>cross50x200</td><td>6.8%</td><td>3.8%</td><td>7.8%</td><td><b>14.0%</b></td></tr><tr><td class='l'>tsmom126</td><td>5.8%</td><td>6.5%</td><td>6.0%</td><td><b>19.2%</b></td></tr></table>
+<p class="cap"><b>Table 1.</b> Rejection rates at the 5% level when the rule has no skill.
+Monte Carlo error is about &plusmn;2.2 points.</p>
+<p><b>Conformal coverage.</b> On 50 null markets of 60 years (182
+origins each), the ACI bound missed 21.2% of the time against a 20% target
+(sd 2.8% across runs); the fixed split-conformal quantile missed
+23.3%, because overlapping windows and selection make scores only approximately
+exchangeable. ACI's correction is what keeps the bound honest.</p>
+<p><b>Power.</b> Rigor has a price. With 20 years of data the full verdict finds a planted edge of
+0.8 Sharpe 28% of the time, 1.1 Sharpe 59% and 1.4
+Sharpe 71%. Edges of a few tenths of a Sharpe point, typical of real index timing, cannot be
+confirmed from 20 years of daily index data by any of these tests. The battery is built to make false
+positives rare; it will also reject some true but small effects.</p>
+
+<h2>4. Case studies on real data</h2>
+<table><tr><th class="l">Idea and sample</th><th>Net edge</th><th>Costs</th><th>Timing</th>
+<th>Selection</th><th>Overfit</th><th>Stability</th><th>Delay</th><th>Holdout</th><th>Conformal</th>
+<th>Verdict</th></tr><tr><td class='l'>Crash Replay rule, S&amp;P 500, 1951-2006 (holdout 2007+)</td><td>+0.20</td><td class="ok">pass</td><td class="ok">pass</td><td class="no">FAIL</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="no">FAIL</td><td class='no'><b>fails</b></td></tr><tr><td class='l'>Crash Replay rule, Nasdaq, 1973-2026</td><td>+0.29</td><td class="ok">pass</td><td class="ok">pass</td><td class="no">FAIL</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="na">n/a</td><td class="no">FAIL</td><td class='no'><b>fails</b></td></tr><tr><td class='l'>Crash Replay rule, Dow, 1993-2026</td><td>-0.12</td><td class="no">FAIL</td><td class="no">FAIL</td><td class="no">FAIL</td><td class="ok">pass</td><td class="no">FAIL</td><td class="no">FAIL</td><td class="na">n/a</td><td class="no">FAIL</td><td class='no'><b>fails</b></td></tr><tr><td class='l'>Best of 912 rules (sma10), 1951-1999 (holdout 2000+)</td><td>+0.51</td><td class="ok">pass</td><td class="ok">pass</td><td class="no">FAIL</td><td class="ok">pass</td><td class="no">FAIL</td><td class="no">FAIL</td><td class="no">FAIL</td><td class="no">FAIL</td><td class='no'><b>fails</b></td></tr><tr><td class='l'>Turn of the month (tom1+3), 1950-1989 (holdout 1990+)</td><td>+0.50</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="ok">pass</td><td class="no">FAIL</td><td class="no">FAIL</td><td class='no'><b>fails</b></td></tr></table>
+<p class="cap"><b>Table 2.</b> Gate results. Net edge is the Sharpe ratio of the rule minus that of buy and
+hold after realistic costs, on the design sample. Search family: the 98-rule standard family
+for the Crash Replay rule, 912 rules for data mining, 13 calendar variants
+for the turn of the month.</p>
+
+<h3>4.1 Crash Replay's trend rule</h3>
+<p>Crash Replay pits the player against a "quant": invested only while the S&amp;P 500 is above its 200-day
+average, sized to a 15% volatility target. Inside the game's five crashes it looks excellent (Table 3): it
+lost far less in 2008, 1987, 2000-02 and 2022. But the crashes were chosen because they are crashes,
+the setting where trend rules do best, and the rule lagged in the COVID rebound.</p>
+<table><tr><th class="l">Crash window</th><th>Rule</th><th>Buy and hold</th><th>Rule max DD</th>
+<th>B&amp;H max DD</th><th>Beats random traders</th></tr><tr><td class='l'>2008 Financial Crisis</td><td>2%</td><td>-23%</td><td>18%</td><td>56%</td><td>64%</td></tr><tr><td class='l'>Black Monday 1987</td><td>8%</td><td>-8%</td><td>10%</td><td>34%</td><td>68%</td></tr><tr><td class='l'>Dot-com bust</td><td>26%</td><td>-51%</td><td>20%</td><td>80%</td><td>93%</td></tr><tr><td class='l'>COVID crash</td><td>8%</td><td>22%</td><td>15%</td><td>34%</td><td>47%</td></tr><tr><td class='l'>2022 rate shock</td><td>12%</td><td>-10%</td><td>11%</td><td>37%</td><td>80%</td></tr></table>
+<p class="cap"><b>Table 3.</b> Total return inside each Crash Replay window after costs.</p>
+<p>On the full record the picture is more modest. The rule's Sharpe edge is +0.20
+on 1951-2006 and survives costs (capacity about $3.2B) and delay. It fails the selection gate:
+DSR 0.35 against a hurdle of 0.31, Romano-Wolf
+p = 0.35. The edge has also decayed decade by decade, from +0.89 in the
+1950s to -0.15 in the 2010s (Figure 2), with halves of +0.43 and +0.03.
+After 2007, the year the 200-day rule was popularized [9], it kept its drawdown control
+(max drawdown 18% vs 56%) and a
+small Sharpe edge of +0.06 (bootstrap p = 0.36). It replicates in direction on the
+Nasdaq (+0.29) and fails on the Dow since 1993 (-0.12).
+The honest summary: a sensible risk-control rule that reduces drawdowns, whose return edge cannot be
+distinguished from the best of a search.</p>
+<figure><img src="figures/crash_replay.png"></figure>
+<p class="cap"><b>Figure 2.</b> The Crash Replay rule on the S&amp;P 500 after costs, and its Sharpe edge by decade.</p>
+<figure><img src="figures/conformal.png"></figure>
+<p class="cap"><b>Figure 3.</b> 80% conformal lower bound on the next-3-year edge at each quarter (blue)
+against the realised edge (gray). Misses: 17% over 252 origins.
+Today's bound is -0.36: the data cannot promise a positive edge.</p>
+
+<h3>4.2 Data mining: the best of 912 rules</h3>
+<p>We search 912 rules (fine grids of trend, crossover, momentum, reversal, RSI, breakout,
+Bollinger, volatility-target and calendar rules) on 1951-1999 and hold out 2000-2026, as in Sullivan,
+Timmermann and White [23]. The winner, sma10 (long when the index closes above its 10-day
+average), has a net edge of +0.51 and passes the Holm
+(p = 0.002), Romano-Wolf (p = 0.002) and SPA
+(p = 0.002) corrections. Many researchers would stop here. The battery does not:
+DSR is 0.90, the edge turns to -0.32 if trades happen one day
+later, CUSUM finds a break near 1980, and on the holdout the edge is
+-0.49. The likely cause is known: daily index returns before the 1980s were
+positively autocorrelated because many component stocks traded rarely, so yesterday's index move
+predicted today's [15]. That pattern is real in the data but could not be traded at index prices,
+and it is gone. This is the case that shows why multiple-testing corrections alone are not enough.</p>
+<figure><img src="figures/data_mined.png"></figure>
+<p class="cap"><b>Figure 4.</b> Left: CSCV splits of the 1950-1999 search (in-sample winner's edge vs its
+out-of-sample edge). Right: the winner relative to buy and hold after costs, trading at the next close and
+one day later; the dashed line marks the holdout.</p>
+
+<h3>4.3 A published anomaly: the turn of the month</h3>
+<p>Stocks have historically earned much of their return around the turn of the month [2, 14]. We search
+13 variants on 1950-1989 and hold out 1990-2026. The best, tom1+3 (hold the last
+trading day and the first three of each month), passes every statistical gate on the design sample: DSR
+0.96, Romano-Wolf p = 0.021, PBO 0.10, stable
+halves. On the holdout its edge is -0.19. This matches McLean and Pontiff's
+finding that anomalies weaken after publication [16]. A real effect in one era is not a forecast.</p>
+<figure><img src="figures/turn_of_month.png"></figure>
+<p class="cap"><b>Figure 5.</b> Rolling 5-year Sharpe edge of the turn-of-the-month rule.</p>
+
+<h2>5. Limitations</h2>
+<p>(1) <b>The search record is self-reported.</b> Every selection-adjusted test is only as honest as the
+family passed to it; rules tried and forgotten are not counted. (2) <b>Null models are models.</b> The
+GARCH-t null has no regime changes; the circular-shift null keeps each series' own dependence but not
+their joint dependence at other lags. (3) <b>Low power.</b> Section 3 shows modest true edges are usually
+rejected on 20 years of daily data. (4) <b>Index data only.</b> Results are for three US indexes, mostly
+long-only timing; dividends are monthly approximations for the S&amp;P 500 and missing for the Nasdaq and Dow.
+Costs assume an index ETF or future at today's liquidity, which flatters the early decades. (5) <b>Scaling
+uses full-sample volatility,</b> a mild look-ahead that does not change Sharpe ratios but affects the
+bootstrap tests' scale. (6) <b>N<sub>eff</sub> is an approximation,</b> and DSR assumes trials are
+comparable. (7) <b>Conformal guarantees are marginal and approximate:</b> coverage is checked empirically,
+not proved, for overlapping windows. (8) No result here is investment advice; the framework says when an
+idea is <i>not</i> supported, never that one will make money.</p>
+
+<h2>6. Reproducibility</h2>
+<p style="text-align:left"><code>pip install -e .</code> then <code>btv validate --market spx --candidate trend200_vt15_20</code>.
+<code>python scripts/null_harness.py</code> and <code>python scripts/case_studies.py</code> regenerate every
+number and figure (about 20 and 10 minutes on 4 CPU cores); <code>python scripts/build_paper.py</code>
+rebuilds this PDF from the result files. The data snapshot is in <code>data/raw</code>; 28 unit tests and CI
+check the statistics, the no-look-ahead property and the pipeline. Code: MIT license.</p>
+
+<h2>References</h2>
+<ol class="refs">
+<li>Almgren, Thum, Hauptmann, Li. Direct estimation of equity market impact. <i>Risk</i>, 2005.</li>
+<li>Ariel. A monthly effect in stock returns. <i>J. Financial Economics</i> 18, 1987.</li>
+<li>Bailey, Borwein, L&oacute;pez de Prado, Zhu. Pseudo-mathematics and financial charlatanism. <i>Notices of the AMS</i> 61(5), 2014.</li>
+<li>Bailey, Borwein, L&oacute;pez de Prado, Zhu. The probability of backtest overfitting. <i>J. Computational Finance</i> 20(4), 2017.</li>
+<li>Bailey, L&oacute;pez de Prado. The Sharpe ratio efficient frontier. <i>J. Risk</i> 15(2), 2012.</li>
+<li>Bailey, L&oacute;pez de Prado. The deflated Sharpe ratio. <i>J. Portfolio Management</i> 40(5), 2014.</li>
+<li>Benjamini, Hochberg. Controlling the false discovery rate. <i>JRSS B</i> 57, 1995.</li>
+<li>Benjamini, Yekutieli. The control of the false discovery rate under dependency. <i>Annals of Statistics</i> 29, 2001.</li>
+<li>Faber. A quantitative approach to tactical asset allocation. <i>J. Wealth Management</i> 9(4), 2007.</li>
+<li>Gibbs, Cand&egrave;s. Adaptive conformal inference under distribution shift. <i>NeurIPS</i>, 2021.</li>
+<li>Hansen. A test for superior predictive ability. <i>J. Business &amp; Economic Statistics</i> 23, 2005.</li>
+<li>Harvey, Liu, Zhu. &hellip;and the cross-section of expected returns. <i>Review of Financial Studies</i> 29, 2016.</li>
+<li>Holm. A simple sequentially rejective multiple test procedure. <i>Scandinavian J. Statistics</i> 6, 1979.</li>
+<li>Lakonishok, Smidt. Are seasonal anomalies real? A ninety-year perspective. <i>Review of Financial Studies</i> 1, 1988.</li>
+<li>Lo, MacKinlay. An econometric analysis of nonsynchronous trading. <i>J. Econometrics</i> 45, 1990.</li>
+<li>McLean, Pontiff. Does academic research destroy stock return predictability? <i>J. Finance</i> 71, 2016.</li>
+<li>Newey, West. A simple, positive semi-definite, heteroskedasticity and autocorrelation consistent covariance matrix. <i>Econometrica</i> 55, 1987.</li>
+<li>Patton, Politis, White. Correction to automatic block-length selection for the dependent bootstrap. <i>Econometric Reviews</i> 28, 2009.</li>
+<li>Ploberger, Kr&auml;mer. The CUSUM test with OLS residuals. <i>Econometrica</i> 60, 1992.</li>
+<li>Politis, Romano. The stationary bootstrap. <i>JASA</i> 89, 1994.</li>
+<li>Politis, White. Automatic block-length selection for the dependent bootstrap. <i>Econometric Reviews</i> 23, 2004.</li>
+<li>Romano, Wolf. Stepwise multiple testing as formalized data snooping. <i>Econometrica</i> 73, 2005.</li>
+<li>Sullivan, Timmermann, White. Data-snooping, technical trading rule performance, and the bootstrap. <i>J. Finance</i> 54, 1999.</li>
+<li>T&oacute;th et al. Anomalous price impact and the critical nature of liquidity. <i>Physical Review X</i> 1, 2011.</li>
+<li>White. A reality check for data snooping. <i>Econometrica</i> 68, 2000.</li>
+</ol>
+<p class="note">Built with AI-assisted development (Claude Code). Research and education only; not investment advice.</p>
+</body></html>
