@@ -5,6 +5,6 @@ from .engine import Costs
 from .pipeline import Config, Report, validate
 from .strategies import Rule, dense_family, standard_family
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["Market", "load", "Costs", "Config", "Report", "validate", "Rule",
            "standard_family", "dense_family"]

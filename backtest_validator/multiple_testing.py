@@ -96,15 +96,26 @@ class SnoopingBootstrap:
         out["stat"] = t
         return out
 
-    def stepm(self, alpha: float = 0.05) -> dict:
+    def stepm(self, alpha: float = 0.05, recenter: bool = False) -> dict:
         """Romano-Wolf StepM with studentised statistics.
 
         Returns adjusted p-values (one per strategy) and the indices of the
         strategies that beat the benchmark at level ``alpha``.
+
+        With ``recenter=True`` this is the Step-SPA test of Hsu, Hsu and
+        Kuan (2010): rules whose mean is clearly negative (below Hansen's
+        -sqrt(2 log log n) * omega / sqrt(n) threshold) keep their negative
+        centre in the bootstrap, so obviously bad rules stop inflating the
+        critical value. That adds power without giving up asymptotic
+        family-wise error control.
         """
         rn = np.sqrt(self.n)
         t = rn * self.dbar / self.omega
-        z = rn * (self.boot - self.dbar) / self.omega   # reps x k
+        centre = self.dbar
+        if recenter:
+            thresh = -np.sqrt(self.omega ** 2 * 2 * np.log(np.log(self.n))) / rn
+            centre = np.where(self.dbar >= thresh, self.dbar, 0.0)
+        z = rn * (self.boot - centre) / self.omega   # reps x k
         order = np.argsort(-t)
         padj = np.empty(self.k)
         running = 0.0

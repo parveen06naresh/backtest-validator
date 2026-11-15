@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "backtest-validator"
-version = "0.1.0"
+version = "0.2.0"
 description = "A battery of statistical tests that tries to kill false positives in trading-signal research."
 readme = "README.md"
 license = { text = "MIT" }

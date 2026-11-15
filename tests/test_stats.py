@@ -84,3 +84,19 @@ def test_pbo_extremes():
     edge = noise.copy()
     edge[:, 3] += 0.003
     assert pbo(edge, 8)["pbo"] < 0.05
+
+
+def test_stepspa_controls_error_and_ignores_bad_rules():
+    rng = np.random.default_rng(8)
+    fp = 0
+    for s in range(60):
+        X = rng.normal(0, 0.01, (1500, 30))
+        X[:, 10:] -= 0.004          # clearly bad rules
+        sb = SnoopingBootstrap(X, reps=300, block=1.5, seed=s)
+        fp += len(sb.stepm(0.05, recenter=True)["rejected"]) > 0
+    assert fp / 60 <= 0.12
+    X = rng.normal(0, 0.01, (1500, 30))
+    X[:, 10:] -= 0.004
+    X[:, 0] += 0.0009
+    sb = SnoopingBootstrap(X, reps=500, block=1.5)
+    assert sb.stepm(0.05, recenter=True)["p_adjusted"][0] <= sb.stepm(0.05)["p_adjusted"][0] + 1e-12

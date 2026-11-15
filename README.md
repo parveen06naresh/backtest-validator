@@ -6,7 +6,7 @@ You give it a trading idea and the record of everything you tried while looking 
 gates, each aimed at one common way a backtest fools people, and reports which ones the idea passed and
 which one stopped it.
 
-**Paper (6 pages):** [paper/backtest-validator.pdf](paper/backtest-validator.pdf)
+**Paper (7 pages):** [paper/backtest-validator.pdf](paper/backtest-validator.pdf)
 
 > Research and education only. Nothing here is investment advice, and the tool never says an idea will
 > make money. It can only say when the evidence does not support one.
@@ -23,14 +23,25 @@ positive most of the time if you skip the corrections. The battery keeps that ra
 | White Reality Check / Hansen SPA | 3.8% / 2.2% |
 | Romano-Wolf StepM | 1.8% |
 | Deflated Sharpe Ratio ≥ 0.95 | 0.2% |
-| **Full verdict (all eight gates)** | **0 of 400** (95% upper bound 1.0%) |
+| Step-SPA (the selection gate) | 2.2% |
+| **Full verdict (all eight gates)** | **0.8%** (3 of 400; 95% upper bound 2.2%) |
+
+It also has to find real edges. On markets with a planted edge, v0.2 finds it far more often than the
+stricter first version while staying under 5% false positives:
+
+| Planted Sharpe edge | 20 years of data, v0.2 | v0.1 | 40 years, v0.2 |
+|---|---|---|---|
+| 0.5 | 20% | 5% | 40% |
+| 0.8 | **60%** | 28% | **68%** |
+| 1.1 | **74%** | 59% | **83%** |
+| 1.4 | 82% | 71% | |
 
 Then four real ideas on public index data from 1950 to 2026. **None survives:**
 
 | Idea | What it looked like | What killed it |
 |---|---|---|
-| Crash Replay's trend rule (200-day trend × 15% vol target) | Lost far less in 2008, 1987, 2000 and 2022; Sharpe edge +0.16 after costs | Selection: not distinguishable from the best of 98 trend rules (DSR 0.28). Edge fell from +0.89 in the 1950s to −0.15 in the 2010s |
-| Best of 912 data-mined rules, 1951–1999 | Sharpe edge +0.51; **passed Holm, Romano-Wolf and SPA** | One-day execution delay turns it to −0.32; break near 1980; −0.49 on 2000–2026 |
+| Crash Replay's trend rule (200-day trend × 15% vol target) | Lost far less in 2008, 1987, 2000 and 2022; Sharpe edge +0.16 after costs | Selection: not distinguishable from the best of 98 trend rules (Step-SPA p = 0.29). Edge fell from +0.89 in the 1950s to −0.15 in the 2010s |
+| Best of 912 data-mined rules, 1951–1999 | Sharpe edge +0.51; **passed Holm, Romano-Wolf, SPA and Step-SPA** | One-day execution delay turns it to −0.32; break near 1980; −0.49 on 2000–2026 |
 | Turn of the month, 1950–1989 | Passed **every** statistical gate | Reversed after publication: −0.19 on 1990–2026 |
 | Same trend rule on the Dow, 1993–2026 | | Negative edge, fails 6 of 8 gates |
 
@@ -49,12 +60,12 @@ used here fixes that (3.5 to 7.8%).
 |---|---|---|
 | costs | Does the edge survive trading costs and market impact? | spread + fee + square-root impact; harsh-cost stress; capacity in $ |
 | timing | Would the same positions at a random alignment do as well? | circular-shift permutation (keeps autocorrelation, exact via FFT, no look-ahead) |
-| selection | Is the edge more than the best of N tries? | Deflated Sharpe Ratio with effective N; Romano-Wolf StepM; also White RC, Hansen SPA, Holm, BH, BY |
+| selection | Is the edge more than the best of N tries? | Step-SPA (Hsu-Hsu-Kuan: Romano-Wolf stepdown with Hansen recentering); also reports Deflated Sharpe, White RC, Hansen SPA, Holm, BH, BY |
 | overfit | Does the in-sample winner stay good out of sample? | Probability of Backtest Overfitting (CSCV, 16 blocks) |
 | stability | Does the edge live in one era? | both halves, 3-year blocks, CUSUM break test (Newey-West); tables by decade, trend, volatility, recession |
 | delay | Does it need perfect same-close execution? | rerun trading one day later |
 | holdout | Does it hold on data the search never saw? | candidate chosen without the holdout |
-| conformal | Is a calibrated bound on the next 3 years above zero? | walk-forward haircuts + Adaptive Conformal Inference (the method from [Pacer](https://github.com/parveen06naresh/pacer-serve)); 21.2% realized miss rate vs 20% target on null markets |
+| conformal | After the usual in-sample to out-of-sample decay, is the forecast edge still above zero? | walk-forward haircuts + Adaptive Conformal Inference (the method from [Pacer](https://github.com/parveen06naresh/pacer-serve)); the 80% bound is reported, with a 21.2% realized miss rate vs 20% target on null markets |
 
 All comparisons are like for like: the rule and buy-and-hold are both scaled to 10% volatility before
 subtracting, so a rule gets no credit for simply holding less risk. Shared stationary-bootstrap draws
@@ -96,7 +107,7 @@ positions in [-1, 1] using only data up to each close. The engine adds the one-d
 python scripts/null_harness.py       # ~20 min on 4 cores -> results/null_harness.json
 python scripts/case_studies.py       # ~10 min -> results/case_studies.json, paper/figures
 python scripts/build_paper.py        # -> paper/backtest-validator.pdf (needs Playwright for the PDF)
-pytest -q                            # 28 tests
+pytest -q                            # 29 tests
 ```
 
 Every number in the paper is read from the results files. The data snapshot in `data/raw` (S&P 500,
@@ -126,8 +137,9 @@ scripts/               null harness, case studies, paper builder, data refresh
 ## Limitations
 
 - The search record is self-reported. Rules you tried and forgot are not counted.
-- Low power by design: on 20 years of daily data the full verdict finds a planted 0.8-Sharpe edge 28% of
-  the time and a 1.4-Sharpe edge 71%. Small true effects get rejected.
+- Small edges are hard to confirm: on 20 years of daily data a planted 0.5-Sharpe edge is found 20% of
+  the time (40% with 40 years). No valid test can do much better on one index. `Config(selection="strict",
+  conformal_gate="bound")` restores the stricter v0.1 rules.
 - US index data only, mostly long/flat timing rules. Dividends are monthly approximations for the
   S&P 500 and missing for the Nasdaq and Dow. Costs assume today's ETF liquidity.
 - Null models are models. Conformal coverage is checked empirically, not proved, for overlapping windows.

@@ -19,7 +19,9 @@ way a backtest fools people:
   stability   the edge lives in one era or flips sign over time
   delay       the edge needs perfect same-close execution
   holdout     the edge disappears on data the search never saw
-  conformal   a calibrated bound on future edge is not above zero
+  conformal   after the usual in-sample to out-of-sample decay, the
+              forecast edge is not above zero (the calibrated bound is
+              reported alongside)
 """
 from __future__ import annotations
 
@@ -51,6 +53,12 @@ class Config:
     oos_days: int = 756
     holdout_start: str | None = None
     capacity: bool = True
+    # "stepspa": Hsu-Hsu-Kuan Step-SPA p <= alpha (exact bootstrap FWER control).
+    # "strict": also require Deflated Sharpe >= 1 - alpha (v0.1 rule; ~half the power).
+    selection: str = "stepspa"
+    # "median": forecast edge after the typical haircut must be > 0.
+    # "bound": the (1 - conformal_alpha) lower bound must be > 0 (v0.1 rule).
+    conformal_gate: str = "median"
 
 
 def active_returns(net: pd.DataFrame, bench: pd.Series) -> pd.DataFrame:
@@ -159,22 +167,25 @@ def validate(market: Market, family: list[Rule], candidate: str = "best",
     dsr_trials = metrics.deflated_sharpe(d.values, srs_daily, n_trials=n_eff, var_method="trials")
     spa = sb.spa()
     stepm = sb.stepm(cfg.alpha)
+    stepspa = sb.stepm(cfg.alpha, recenter=True)
     det["selection"] = {"n_rules": int(A.shape[1]), "n_effective": n_eff, "block": sb.block,
                         "p_single": float(single[k]), "p_adjusted": adj,
                         "dsr": dsr, "dsr_trial_variance": dsr_trials,
                         "reality_check_p": sb.reality_check(), "spa": spa,
                         "stepm_p": float(stepm["p_adjusted"][k]),
+                        "stepspa_p": float(stepspa["p_adjusted"][k]),
                         "stepm_survivors": [A.columns[i] for i in stepm["rejected"]],
                         "edge_sharpe": metrics.sharpe(d)}
     if A.shape[1] == 1:
         ok = single[k] < cfg.alpha
         why = f"single rule, bootstrap p = {single[k]:.3f}"
     else:
-        ok = dsr["dsr"] >= 1 - cfg.alpha and stepm["p_adjusted"][k] <= cfg.alpha
-        why = (f"DSR = {dsr['dsr']:.2f} (hurdle {dsr['sr0_annual']:.2f} from "
-               f"{n_eff:.0f} effective of {A.shape[1]} rules), Romano-Wolf p = "
-               f"{stepm['p_adjusted'][k]:.3f}, SPA p = {spa['consistent']:.3f}, "
-               f"Holm p = {adj['holm']:.3f}")
+        p_sel = float(stepspa["p_adjusted"][k])
+        ok = p_sel <= cfg.alpha if cfg.selection == "stepspa" else (
+            dsr["dsr"] >= 1 - cfg.alpha and stepm["p_adjusted"][k] <= cfg.alpha)
+        why = (f"Step-SPA p = {p_sel:.3f} across {A.shape[1]} rules (Romano-Wolf "
+               f"{stepm['p_adjusted'][k]:.3f}, SPA {spa['consistent']:.3f}, Holm {adj['holm']:.3f}); "
+               f"DSR = {dsr['dsr']:.2f} vs hurdle {dsr['sr0_annual']:.2f} from {n_eff:.0f} effective rules")
     gates["selection"] = {"pass": bool(ok), "why": why}
 
     # 4. overfitting (PBO) -------------------------------------------------
@@ -243,10 +254,12 @@ def validate(market: Market, family: list[Rule], candidate: str = "best",
         now = conformal.current_bound(A, wf, b, cfg.conformal_alpha, is_days=cfg.is_days, fixed=fixed)
         det["conformal"] = {**cs_, "now": now, "_bounds": b}
         gates["conformal"] = {
-            "pass": bool(now["lower_bound"] > 0),
-            "why": f"{1 - cfg.conformal_alpha:.0%} lower bound on next-3-year Sharpe edge "
-                   f"{now['lower_bound']:+.2f} (IS {now['is_sharpe']:+.2f}); realised miss rate "
-                   f"{cs_['aci_miss_rate']:.0%} vs {cfg.conformal_alpha:.0%} target over {cs_['n']} origins"}
+            "pass": bool(now["median_forecast"] > 0 if cfg.conformal_gate == "median"
+                         else now["lower_bound"] > 0),
+            "why": f"forecast next-3-year Sharpe edge {now['median_forecast']:+.2f} after the typical "
+                   f"in-to-out-of-sample haircut; {1 - cfg.conformal_alpha:.0%} lower bound "
+                   f"{now['lower_bound']:+.2f} (realised miss rate {cs_['aci_miss_rate']:.0%} vs "
+                   f"{cfg.conformal_alpha:.0%} target over {cs_['n']} origins)"}
     else:
         gates["conformal"] = {"pass": None, "why": "sample too short for walk-forward"}
 

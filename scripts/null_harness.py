@@ -47,10 +47,11 @@ def wilson(k, n, z=1.96):
     return [float((c - h) / d), float((c + h) / d)]
 
 
-def one_null(seed: int, signal: float = 0.0) -> dict:
-    m = nulls.simulate(N_DAYS, seed=seed, signal=signal)
+def one_null(seed: int, signal: float = 0.0, years: int = 20) -> dict:
+    n_days = 252 * years
+    m = nulls.simulate(n_days, seed=seed, signal=signal)
     cfg = Config(reps=300, capacity=False, seed=seed,
-                 holdout_start=str(m.index[HOLDOUT_AT].date()))
+                 holdout_start=str(m.index[int(n_days * 0.75)].date()))
     r = validate(m, S.standard_family(), "best", cfg=cfg)
     sel = r.details["selection"]
     g = {k: v["pass"] for k, v in r.gates.items()}
@@ -68,6 +69,11 @@ def one_null(seed: int, signal: float = 0.0) -> dict:
         "timing_gate_on_best": bool(g["timing"]),
         "selection_gate": bool(g["selection"]),
         "verdict_survives": r.survives,
+        "romano_wolf_candidate": sel["stepm_p"] <= a,
+        "stepspa_candidate": sel["stepspa_p"] <= a,
+        # v0.1 rules: selection also needs DSR >= 0.95, conformal needs the 80% bound > 0
+        "verdict_strict_v01": bool(r.survives and sel["dsr"]["dsr"] >= 1 - a and (
+            r.details.get("conformal", {}).get("now", {}).get("lower_bound", 1) > 0)),
         "pbo": r.details.get("pbo", {}).get("pbo"),
         "candidate": r.candidate,
     }
@@ -146,11 +152,20 @@ def main():
                              [sig] * args.power_reps))
             res["power"][str(sig)] = {k: rate(pr, k) for k in
                                       ("naive_best_p<0.05", "romano_wolf_any", "spa_consistent",
-                                       "dsr_sampling>=0.95", "selection_gate", "verdict_survives")}
+                                       "dsr_sampling>=0.95", "selection_gate", "verdict_survives",
+                                       "verdict_strict_v01")}
             res["power"][str(sig)]["trend_family_selected"] = float(np.mean(
                 [any(t in r["candidate"] for t in ("sma", "cross", "tsmom", "trend", "donchian"))
                  for r in pr]))
             print("power", sig, round(time.time() - t0), "s", flush=True)
+        res["power_40y"] = {}
+        n40 = max(args.power_reps * 6 // 10, 10)
+        for sig in (0.02, 0.04, 0.06, 0.08):
+            pr = list(ex.map(one_null, range(70_000, 70_000 + n40), [sig] * n40, [40] * n40))
+            res["power_40y"][str(sig)] = {k: rate(pr, k) for k in
+                                          ("naive_best_p<0.05", "selection_gate", "verdict_survives",
+                                           "verdict_strict_v01")}
+            print("power 40y", sig, round(time.time() - t0), "s", flush=True)
     # what edge does each planted signal create? (measured on long samples)
     from backtest_validator import engine, metrics
     edges = {}

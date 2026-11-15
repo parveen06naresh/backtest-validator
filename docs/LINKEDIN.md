@@ -5,9 +5,10 @@
 **Backtest Validator** · Python, NumPy, SciPy · github.com/parveen06naresh/backtest-validator
 - Built an open-source framework that runs 8 statistical gates on a trading idea (Deflated Sharpe, PBO,
   White Reality Check, Hansen SPA, Romano-Wolf, block bootstrap, cost and capacity model, conformal bounds).
-- Cut the false-positive rate on the best of 99 rules from 31.8% to 0 of 400 null markets (95% bound 1.0%); 28 tests, CI.
+- Cut the false-positive rate on the best of 99 rules from 31.8% to 0.8% (400 null markets) while finding a planted
+  0.8-Sharpe edge 60% of the time (2x the stricter first version); 29 tests, CI.
 - Showed that a 912-rule data-mining winner passed Holm, Romano-Wolf and SPA but failed under a 1-day execution delay
-  and after 1999. Wrote a 6-page paper.
+  and after 1999. Wrote a 7-page paper.
 
 ## LinkedIn post (draft)
 
@@ -36,9 +37,10 @@ Two results I didn't expect:
    rising market it flags no-skill rules 14–19% of the time instead of 5%. The new test fixes that.
 
 On 400 simulated markets with no edge, picking the best of 99 rules gives a false positive 32% of the
-time. With all 8 gates it gave 0 out of 400.
+time. With all 8 gates: 0.8%. And when I plant a real edge, it finds it 60% of the time, so it's not
+a tool that just says no.
 
-Code, data and a 6-page paper: github.com/parveen06naresh/backtest-validator
+Code, data and a 7-page paper: github.com/parveen06naresh/backtest-validator
 
 Research and education only, not investment advice.
 

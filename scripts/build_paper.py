@@ -36,7 +36,8 @@ def harness_figures():
     rows = [("Best rule, no correction", "naive_best_p<0.05"), ("Bonferroni", "bonferroni"),
             ("Holm", "holm"), ("Benjamini-Hochberg", "bh_fdr"), ("White Reality Check", "reality_check"),
             ("Hansen SPA", "spa_consistent"), ("Romano-Wolf StepM", "romano_wolf_any"),
-            ("Deflated Sharpe >= 0.95", "dsr_sampling>=0.95"), ("Full verdict (all gates)", "verdict_survives")]
+            ("Deflated Sharpe >= 0.95", "dsr_sampling>=0.95"), ("Step-SPA (selection gate)", "stepspa_candidate"),
+            ("Full verdict (all gates)", "verdict_survives")]
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), gridspec_kw={"width_ratios": [1.15, 1]})
     ax = axes[0]
     ys = range(len(rows))[::-1]
@@ -57,12 +58,14 @@ def harness_figures():
     edges = H["planted_edge_sharpe_sma100_ls"]
     sigs = list(H["power"])
     x = [edges[s] for s in sigs]
-    for k, lab, col, ls in (("naive_best_p<0.05", "No correction", ORANGE, "-"),
-                            ("romano_wolf_any", "Romano-Wolf", GRAY, "-"),
-                            ("selection_gate", "Selection gate (DSR + RW)", BLUE, "--"),
-                            ("verdict_survives", "Full verdict", BLUE, "-")):
+    for k, lab, col, ls in (("naive_best_p<0.05", "No correction (invalid)", ORANGE, "-"),
+                            ("verdict_strict_v01", "Full verdict, v0.1 rules", GRAY, "--"),
+                            ("verdict_survives", "Full verdict, v0.2 (20 yrs)", BLUE, "-")):
         ax2.plot(x, [H["power"][s][k]["rate"] for s in sigs], color=col, ls=ls, lw=1.4, marker="o",
                  ms=3.5, label=lab)
+    s40 = list(H["power_40y"])
+    ax2.plot([edges[s] for s in s40], [H["power_40y"][s]["verdict_survives"]["rate"] for s in s40],
+             color=BLUE, ls=":", lw=1.6, marker="s", ms=3.5, label="Full verdict, v0.2 (40 yrs)")
     ax2.set_xlabel("Planted Sharpe edge of the true rule", fontsize=8, color=MUTED)
     ax2.set_ylim(0, 1.03)
     ax2.set_title("Power: runs that find a real edge", fontsize=9, loc="left", color=INK)
@@ -160,8 +163,11 @@ alignment matches, selection from many trials, in-sample overfitting, instabilit
 dependence on perfect execution, failure on held-out data, and a calibrated bound on future
 performance. On {n['verdict_survives']['n']} synthetic markets with no edge, picking the best of
 {H['family_size']} textbook rules and running a plain significance test gives a false positive
-{pct(n['naive_best_p<0.05']['rate'], 0)} of the time; the corrected tests stay at or below 5%, and the full
-verdict passed none of them (95% upper bound {pct(n['verdict_survives']['ci95'][1])}). We then apply it
+{pct(n['naive_best_p<0.05']['rate'], 0)} of the time; the full verdict passes {pct(n['verdict_survives']['rate'])}
+(95% upper bound {pct(n['verdict_survives']['ci95'][1])}). On markets with a planted edge of
+{H['planted_edge_sharpe_sma100_ls']['0.08']:.1f} Sharpe it finds the edge {pct(H['power']['0.08']['verdict_survives']['rate'], 0)}
+of the time with 20 years of data, up from {pct(H['power']['0.08']['verdict_strict_v01']['rate'], 0)} under our stricter
+first version. We then apply it
 to four real ideas on 76 years of public index data: the trend rule from our earlier Crash Replay project,
 the best of {sel_dm['n_rules']} data-mined technical rules, and the turn-of-the-month effect, plus
 replications on other indexes. None survives. The data-mined winner passes the Holm, Romano-Wolf and SPA
@@ -209,8 +215,11 @@ original random-trader test for comparison.
 <b>Selection.</b> One shared stationary bootstrap [20] of the T&times;K active-return matrix
 (automatic block length [21, 18]) gives White's Reality Check [25], Hansen's SPA test [11] and Romano-Wolf
 StepM adjusted p-values [22]; Holm [13], Benjamini-Hochberg [7] and Benjamini-Yekutieli [8] adjustments are
-also reported. The gate requires the Deflated Sharpe Ratio [5, 6] to be at least 0.95 and the candidate's
-StepM p-value to be at most 0.05. The DSR hurdle is the expected maximum Sharpe of <i>N</i><sub>eff</sub>
+also reported. The gate uses the Step-SPA test of Hsu, Hsu and Kuan [26]: Romano-Wolf's stepdown with
+Hansen's recentering, so rules that are clearly worse than the benchmark stop inflating the critical value.
+The candidate passes if its Step-SPA adjusted p-value is at most 0.05. We also report the Deflated Sharpe
+Ratio [5, 6]; version 0.1 of the tool required DSR &ge; 0.95 as well, which Section 3 shows is far below
+5% under the null and costs about half the power, so it is now an optional strict mode. The DSR hurdle is the expected maximum Sharpe of <i>N</i><sub>eff</sub>
 null trials, with <i>N</i><sub>eff</sub> = &rho;&#772; + (1 &minus; &rho;&#772;)<i>N</i> from the mean
 correlation of the trials. For the variance in the hurdle we use the sampling variance of a zero-Sharpe
 estimate; the original cross-trial variance is reported too and is stricter when a family contains
@@ -226,7 +235,10 @@ edge on it.
 its next-3-year edge; the haircut (in-sample minus out-of-sample) is the conformity score. The bound for a
 new origin is the in-sample edge minus the (1 &minus; &alpha;<sub>t</sub>) quantile of completed past
 haircuts, with &alpha;<sub>t</sub> updated by Adaptive Conformal Inference [10] once each outcome is known
-(the same online update as in Pacer). The gate asks that today's 80% lower bound be above zero.
+(the same online update as in Pacer). The gate asks that today's forecast, the in-sample edge minus the
+median past haircut, be above zero: after the decay that past selections suffered, is anything left? The 80%
+lower bound is reported with it (requiring the bound itself above zero is the strict mode; a 3-year Sharpe
+ratio is so noisy that even a true edge of 1.0 fails that bound about a quarter of the time).
 An idea <b>survives</b> only if it passes every gate that applies.</p>
 
 <h2>3. Does the battery control false positives?</h2>
@@ -244,7 +256,8 @@ markets, six times the nominal rate even though the rules share a common benchma
 brings this to 5% or less: Holm {pct(n['holm']['rate'])}, BH {pct(n['bh_fdr']['rate'])}, Reality Check
 {pct(n['reality_check']['rate'])}, SPA {pct(n['spa_consistent']['rate'])}, Romano-Wolf
 {pct(n['romano_wolf_any']['rate'])}, DSR {pct(n['dsr_sampling>=0.95']['rate'])}. The full verdict
-passed none ({pct(n['verdict_survives']['ci95'][1])} upper bound). The timing gate alone, applied to the
+passes {pct(n['verdict_survives']['rate'])} ({pct(n['verdict_survives']['ci95'][1])} upper bound); the
+Step-SPA selection test alone {pct(n['stepspa_candidate']['rate'])}. The timing gate alone, applied to the
 <i>selected</i> rule, fires in {pct(n['timing_gate_on_best']['rate'], 0)} of null markets: a single-rule
 test is only valid for a rule fixed in advance, which is why selection is its own gate. Mean PBO under
 the null is {n['mean_pbo']:.2f}, as theory predicts.</p>
@@ -264,11 +277,19 @@ origins each), the ACI bound missed {pct(cn['aci_miss_mean'])} of the time again
 (sd {pct(cn['aci_miss_sd'])} across runs); the fixed split-conformal quantile missed
 {pct(cn['split_miss_mean'])}, because overlapping windows and selection make scores only approximately
 exchangeable. ACI's correction is what keeps the bound honest.</p>
-<p><b>Power.</b> Rigor has a price. With 20 years of data the full verdict finds a planted edge of
-{e['0.06']:.1f} Sharpe {pct(p_low, 0)} of the time, {e['0.08']:.1f} Sharpe {pct(p_mid, 0)} and {e['0.1']:.1f}
-Sharpe {pct(p_hi, 0)}. Edges of a few tenths of a Sharpe point, typical of real index timing, cannot be
-confirmed from 20 years of daily index data by any of these tests. The battery is built to make false
-positives rare; it will also reject some true but small effects.</p>
+<p><b>Power.</b> A filter that rejects everything is useless, so we tuned for power without giving up the
+5% limit. Version 0.1 required both DSR &ge; 0.95 and an 80% conformal bound above zero; on the null it
+passed nothing, a sign of wasted strictness. Diagnosing the failures on planted-signal markets showed the
+DSR requirement alone blocked about 60% of true edges that Romano-Wolf accepted. Version 0.2 gates on
+Step-SPA and the conformal forecast instead. With 20 years of data the full verdict now finds a planted edge
+of {e['0.06']:.1f} Sharpe {pct(p_low, 0)} of the time (v0.1: {pct(H['power']['0.06']['verdict_strict_v01']['rate'], 0)}),
+{e['0.08']:.1f} Sharpe {pct(p_mid, 0)} (v0.1: {pct(H['power']['0.08']['verdict_strict_v01']['rate'], 0)}) and
+{e['0.1']:.1f} Sharpe {pct(p_hi, 0)} (v0.1: {pct(H['power']['0.1']['verdict_strict_v01']['rate'], 0)}), while the
+null rate stays at {pct(n['verdict_survives']['rate'])}. More data is the other lever: with 40 years,
+a {e['0.06']:.1f}-Sharpe edge is found {pct(H['power_40y']['0.06']['verdict_survives']['rate'], 0)} of the time and a
+{e['0.04']:.1f}-Sharpe edge {pct(H['power_40y']['0.04']['verdict_survives']['rate'], 0)}. The remaining misses are
+mostly the holdout and PBO gates, which a true but modest edge fails by chance on 5 years of data. Edges of
+a few tenths of a Sharpe point cannot be confirmed from one index's daily data by any valid test.</p>
 
 <h2>4. Case studies on real data</h2>
 <table><tr><th class="l">Idea and sample</th><th>Net edge</th><th>Costs</th><th>Timing</th>
@@ -289,8 +310,9 @@ the setting where trend rules do best, and the rule lagged in the COVID rebound.
 <p class="cap"><b>Table 3.</b> Total return inside each Crash Replay window after costs.</p>
 <p>On the full record the picture is more modest. The rule's Sharpe edge is {f2(d(cr)['costs']['edge_net'])}
 on 1951-2006 and survives costs (capacity about ${cap / 1e9:.1f}B) and delay. It fails the selection gate:
-DSR {sel_cr['dsr']['dsr']:.2f} against a hurdle of {sel_cr['dsr']['sr0_annual']:.2f}, Romano-Wolf
-p = {sel_cr['stepm_p']:.2f}. The edge has also decayed decade by decade, from {f2(dec['1950s'])} in the
+Step-SPA p = {sel_cr['stepspa_p']:.2f} against the other {sel_cr['n_rules'] - 1} trend-family rules (DSR
+{sel_cr['dsr']['dsr']:.2f}). On the Nasdaq it comes closer (Step-SPA p = {d(ndq)['selection']['stepspa_p']:.2f}) but
+still misses. The edge has also decayed decade by decade, from {f2(dec['1950s'])} in the
 1950s to {f2(dec['2010s'])} in the 2010s (Figure 2), with halves of {f2(halves[0])} and {f2(halves[1])}.
 After 2007, the year the 200-day rule was popularized [9], it kept its drawdown control
 (max drawdown {pct(hcr['candidate']['max_drawdown'], 0)} vs {pct(hcr['benchmark']['max_drawdown'], 0)}) and a
@@ -311,8 +333,8 @@ Bollinger, volatility-target and calendar rules) on 1951-1999 and hold out 2000-
 Timmermann and White [23]. The winner, {dm['candidate']} (long when the index closes above its 10-day
 average), has a net edge of {f2(d(dm)['costs']['edge_net'])} and passes the Holm
 (p = {sel_dm['p_adjusted']['holm']:.3f}), Romano-Wolf (p = {sel_dm['stepm_p']:.3f}) and SPA
-(p = {sel_dm['spa']['consistent']:.3f}) corrections. Many researchers would stop here. The battery does not:
-DSR is {sel_dm['dsr']['dsr']:.2f}, the edge turns to {f2(d(dm)['delay']['edge_lag2'])} if trades happen one day
+(p = {sel_dm['spa']['consistent']:.3f}) corrections, and so passes our selection gate (Step-SPA p = {sel_dm['stepspa_p']:.3f}). Many researchers would
+stop here. The other gates do not: the edge turns to {f2(d(dm)['delay']['edge_lag2'])} if trades happen one day
 later, CUSUM finds a break near {d(dm)['stability']['cusum']['break_date'][:4]}, and on the holdout the edge is
 {f2(d(dm)['holdout']['edge'])}. The likely cause is known: daily index returns before the 1980s were
 positively autocorrelated because many component stocks traded rarely, so yesterday's index move
@@ -326,7 +348,7 @@ one day later; the dashed line marks the holdout.</p>
 <h3>4.3 A published anomaly: the turn of the month</h3>
 <p>Stocks have historically earned much of their return around the turn of the month [2, 14]. We search
 {sel_tom['n_rules']} variants on 1950-1989 and hold out 1990-2026. The best, {tom['candidate']} (hold the last
-trading day and the first three of each month), passes every statistical gate on the design sample: DSR
+trading day and the first three of each month), passes every statistical gate on the design sample: Step-SPA p = {sel_tom['stepspa_p']:.3f}, DSR
 {sel_tom['dsr']['dsr']:.2f}, Romano-Wolf p = {sel_tom['stepm_p']:.3f}, PBO {d(tom)['pbo']['pbo']:.2f}, stable
 halves. On the holdout its edge is {f2(d(tom)['holdout']['edge'])}. This matches McLean and Pontiff's
 finding that anomalies weaken after publication [16]. A real effect in one era is not a forecast.</p>
@@ -351,7 +373,7 @@ idea is <i>not</i> supported, never that one will make money.</p>
 <p style="text-align:left"><code>pip install -e .</code> then <code>btv validate --market spx --candidate trend200_vt15_20</code>.
 <code>python scripts/null_harness.py</code> and <code>python scripts/case_studies.py</code> regenerate every
 number and figure (about 20 and 10 minutes on 4 CPU cores); <code>python scripts/build_paper.py</code>
-rebuilds this PDF from the result files. The data snapshot is in <code>data/raw</code>; 28 unit tests and CI
+rebuilds this PDF from the result files. The data snapshot is in <code>data/raw</code>; 29 unit tests and CI
 check the statistics, the no-look-ahead property and the pipeline. Code: MIT license.</p>
 
 <h2>References</h2>
@@ -381,6 +403,7 @@ check the statistics, the no-look-ahead property and the pipeline. Code: MIT lic
 <li>Sullivan, Timmermann, White. Data-snooping, technical trading rule performance, and the bootstrap. <i>J. Finance</i> 54, 1999.</li>
 <li>T&oacute;th et al. Anomalous price impact and the critical nature of liquidity. <i>Physical Review X</i> 1, 2011.</li>
 <li>White. A reality check for data snooping. <i>Econometrica</i> 68, 2000.</li>
+<li>Hsu, Hsu, Kuan. Testing the predictive ability of technical analysis using a new stepwise test without data snooping bias. <i>J. Empirical Finance</i> 17, 2010.</li>
 </ol>
 <p class="note">Built with AI-assisted development (Claude Code). Research and education only; not investment advice.</p>
 </body></html>"""
